@@ -1,0 +1,37 @@
+.cg-email-gate {
+    max-width: 420px;
+    margin: 0 auto;
+}
+
+.cg-gallery-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 16px;
+}
+
+.cg-gallery-item img {
+    width: 100%;
+    height: auto;
+    display: block;
+}
+
+.cg-stars {
+    display: flex;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.cg-star {
+    cursor: pointer;
+    color: #ddd;
+    font-size: 20px;
+}
+
+.cg-star.active {
+    color: #e0a800;
+}
+
+.cg-submit-area {
+    margin-top: 20px;
+    text-align: center;
+}
