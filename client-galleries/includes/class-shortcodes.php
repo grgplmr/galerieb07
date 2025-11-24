@@ -26,6 +26,11 @@ class CG_Shortcodes
 
     public function render_gallery($atts): string
     {
+        if (! defined('DONOTCACHEPAGE')) {
+            define('DONOTCACHEPAGE', true);
+        }
+        nocache_headers();
+
         $atts = shortcode_atts([
             'id' => 0,
         ], $atts, 'client_gallery');
@@ -49,11 +54,13 @@ class CG_Shortcodes
         $email = isset($_COOKIE[$cookie_key]) ? sanitize_email(wp_unslash($_COOKIE[$cookie_key])) : '';
 
         ob_start();
+        echo '<div id="cg-gallery-container" data-gallery-id="' . esc_attr($gallery_id) . '">';
         if (! $email) {
             $this->render_email_gate($gallery_id, $cookie_key);
         } else {
-            $this->render_gallery_grid($gallery_id, $email);
+            $this->render_gallery_grid($gallery_id, $email, $cookie_key);
         }
+        echo '</div>';
         return ob_get_clean();
     }
 
@@ -71,11 +78,8 @@ class CG_Shortcodes
         include CG_PLUGIN_DIR . 'templates/front/email-gate.php';
     }
 
-    private function render_gallery_grid(int $gallery_id, string $email): void
+    public function get_gallery_data(int $gallery_id, string $email): array
     {
-        wp_enqueue_style('cg-front');
-        wp_enqueue_script('cg-front');
-
         $email = cg_normalize_email($email);
         $email_hash = cg_email_hash($email);
         $selection = CG_DB::instance()->get_selection($gallery_id, $email_hash);
@@ -88,21 +92,46 @@ class CG_Shortcodes
             'order'          => 'ASC',
         ]);
 
-        wp_localize_script('cg-front', 'cgFront', [
-            'ajaxUrl'   => admin_url('admin-ajax.php'),
-            'nonce'     => CG_Security::create_nonce('front_actions'),
-            'starsMax'  => (int) cg_get_option('stars_max', 5),
-            'galleryId' => $gallery_id,
-            'email'     => $email,
-            'selection' => $selection,
-        ]);
-
         $data = [
             'images'    => $images,
             'selection' => $selection,
             'email'     => $email,
             'gallery'   => get_post($gallery_id),
+            'galleryId' => $gallery_id,
         ];
+
+        return $data;
+    }
+
+    private function render_gallery_grid(int $gallery_id, string $email, string $cookie_key): void
+    {
+        wp_enqueue_style('cg-front');
+        wp_enqueue_script('cg-front');
+
+        $data = $this->get_gallery_data($gallery_id, $email);
+
+        wp_localize_script('cg-front', 'cgFront', [
+            'ajaxUrl'   => admin_url('admin-ajax.php'),
+            'nonce'     => CG_Security::create_nonce('front_actions'),
+            'starsMax'  => (int) cg_get_option('stars_max', 5),
+            'galleryId' => $gallery_id,
+            'email'     => $data['email'],
+            'selection' => $data['selection'],
+            'cookieKey' => $cookie_key,
+        ]);
+
         include CG_PLUGIN_DIR . 'templates/front/gallery-grid.php';
+    }
+
+    public function render_gallery_markup(int $gallery_id, string $email, string $cookie_key): string
+    {
+        $data = $this->get_gallery_data($gallery_id, $email);
+        $data['cookieKey'] = $cookie_key;
+
+        ob_start();
+        echo '<div id="cg-gallery-container" data-gallery-id="' . esc_attr($gallery_id) . '">';
+        include CG_PLUGIN_DIR . 'templates/front/gallery-grid.php';
+        echo '</div>';
+        return ob_get_clean();
     }
 }
