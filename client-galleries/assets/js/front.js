@@ -28,6 +28,13 @@ jQuery(function ($) {
         setCookie('cg_email_' + cgFront.galleryId, cgFront.email);
     }
 
+    const ratingsByImageId = Object.assign({}, cgFront.selection || {});
+
+    function getRatingValue(value) {
+        const parsed = parseInt(value, 10);
+        return isNaN(parsed) ? 0 : parsed;
+    }
+
     function renderStars(container, rating, max) {
         container.find('.cg-star').each(function () {
             const starValue = parseInt($(this).data('value'), 10);
@@ -35,28 +42,44 @@ jQuery(function ($) {
         });
     }
 
-    function initStars() {
-        $('.cg-gallery-item').each(function () {
-            const item = $(this);
-            const ratingAttr = parseInt(item.find('.cg-stars').data('rating'), 10);
-            const imageId = parseInt(item.data('id'), 10);
-            const current = !isNaN(ratingAttr)
-                ? ratingAttr
-                : (cgFront.selection && cgFront.selection[imageId] ? cgFront.selection[imageId] : 0);
-            renderStars(item.find('.cg-stars'), current || 0, cgFront.starsMax);
-            item.find('.cg-stars').attr('data-rating', current || 0);
-        });
+    function buildStars(container) {
+        container.empty();
+        for (let i = 1; i <= cgFront.starsMax; i++) {
+            container.append('<span class="cg-star" data-value="' + i + '">★</span>');
+        }
     }
 
-    initStars();
+    function updateGridStars(imageId, rating) {
+        const item = $('.cg-gallery-item[data-id="' + imageId + '"]');
+        if (!item.length) return;
 
-    $(document).on('click', '.cg-star', function () {
-        const star = $(this);
-        const imageId = parseInt(star.closest('.cg-gallery-item').data('id'), 10);
-        const rating = parseInt(star.data('value'), 10);
-        renderStars(star.parent(), rating, cgFront.starsMax);
-        star.parent().attr('data-rating', rating);
+        const stars = item.find('.cg-stars');
+        stars.attr('data-rating', rating);
+        item.attr('data-rating', rating);
+        renderStars(stars, rating, cgFront.starsMax);
+    }
 
+    function updateLightboxRatingDisplay(imageId, rating) {
+        if (!lightbox.stars || !lightbox.stars.length) return;
+        const currentId = parseInt(lightbox.stars.data('imageId'), 10);
+        if (currentId !== imageId) return;
+
+        lightbox.stars.attr('data-rating', rating);
+        renderStars(lightbox.stars, rating, cgFront.starsMax);
+    }
+
+    function handleRatingSuccess(imageId, rating) {
+        ratingsByImageId[imageId] = rating;
+        updateGridStars(imageId, rating);
+        updateLightboxRatingDisplay(imageId, rating);
+
+        const itemIndex = lightbox.items.findIndex((item) => item.id === imageId);
+        if (itemIndex !== -1) {
+            lightbox.items[itemIndex].rating = rating;
+        }
+    }
+
+    function sendRating(imageId, rating) {
         $.post(cgFront.ajaxUrl, {
             action: 'cg_save_rating',
             nonce: cgFront.nonce,
@@ -64,7 +87,34 @@ jQuery(function ($) {
             image_id: imageId,
             rating: rating,
             email: cgFront.email
+        }).done(function () {
+            handleRatingSuccess(imageId, rating);
         });
+    }
+
+    function initStars() {
+        $('.cg-gallery-item').each(function () {
+            const item = $(this);
+            const ratingAttr = getRatingValue(item.find('.cg-stars').data('rating'));
+            const imageId = parseInt(item.data('id'), 10);
+            const stored = getRatingValue(ratingsByImageId[imageId]);
+            const current = ratingAttr || stored;
+            renderStars(item.find('.cg-stars'), current || 0, cgFront.starsMax);
+            item.find('.cg-stars').attr('data-rating', current || 0);
+            item.attr('data-rating', current || 0);
+            ratingsByImageId[imageId] = current || 0;
+        });
+    }
+
+    initStars();
+
+    $(document).on('click', '.cg-gallery-item .cg-star', function () {
+        const star = $(this);
+        const imageId = parseInt(star.closest('.cg-gallery-item').data('id'), 10);
+        const rating = parseInt(star.data('value'), 10);
+        if (!imageId || !rating) return;
+
+        sendRating(imageId, rating);
     });
 
     $(document).on('click', '#cg-submit-selection', function (e) {
@@ -107,6 +157,8 @@ jQuery(function ($) {
             if (resp.success && resp.data && resp.data.html) {
                 cgFront.email = resp.data.email;
                 cgFront.selection = resp.data.selection || {};
+                Object.keys(ratingsByImageId).forEach(function (key) { delete ratingsByImageId[key]; });
+                Object.assign(ratingsByImageId, cgFront.selection);
                 container.replaceWith(resp.data.html);
                 initStars();
                 setCookie(cgFront.cookieKey, resp.data.email);
@@ -133,8 +185,13 @@ jQuery(function ($) {
         const prevBtn = $('<button class="cg-lightbox-nav cg-lightbox-prev" aria-label="Previous">‹</button>');
         const nextBtn = $('<button class="cg-lightbox-nav cg-lightbox-next" aria-label="Next">›</button>');
         const img = $('<img class="cg-lightbox-image" alt="" />');
+        const stars = $('<div class="cg-lightbox-stars" data-rating="0"></div>');
+        buildStars(stars);
 
-        content.append(closeBtn, prevBtn, img, nextBtn);
+        const mediaContainer = $('<div class="cg-lightbox-media"></div>');
+        mediaContainer.append(img, stars);
+
+        content.append(closeBtn, prevBtn, mediaContainer, nextBtn);
         overlay.append(content);
         $('body').append(overlay);
 
@@ -169,15 +226,24 @@ jQuery(function ($) {
 
         lightbox.overlay = overlay;
         lightbox.image = img;
+        lightbox.stars = stars;
     }
 
     function collectItems() {
         lightbox.items = [];
         $('.cg-gallery-item').each(function (index) {
-            const full = $(this).data('full');
-            if (full) {
-                lightbox.items.push(full);
-                $(this).attr('data-index', index);
+            const item = $(this);
+            const full = item.data('full');
+            const imageId = parseInt(item.data('id'), 10);
+            const itemRating = getRatingValue(item.data('rating')) || getRatingValue(item.find('.cg-stars').data('rating'));
+            const currentRating = itemRating || getRatingValue(ratingsByImageId[imageId]);
+            if (full && imageId) {
+                lightbox.items.push({
+                    full: full,
+                    id: imageId,
+                    rating: currentRating,
+                });
+                item.attr('data-index', index);
             }
         });
     }
@@ -191,7 +257,12 @@ jQuery(function ($) {
             index = 0;
         }
         lightbox.currentIndex = index;
-        lightbox.image.attr('src', lightbox.items[index]);
+        const currentItem = lightbox.items[index];
+        lightbox.currentItem = currentItem;
+        lightbox.image.attr('src', currentItem.full);
+        lightbox.stars.attr('data-image-id', currentItem.id);
+        lightbox.stars.attr('data-rating', currentItem.rating || 0);
+        renderStars(lightbox.stars, currentItem.rating || 0, cgFront.starsMax);
         lightbox.overlay.css('display', 'flex').show().focus();
     }
 
@@ -208,5 +279,15 @@ jQuery(function ($) {
         const parent = $(this).closest('.cg-gallery-item');
         const index = parseInt(parent.data('index'), 10) || 0;
         showImage(index);
+    });
+
+    $(document).on('click', '.cg-lightbox-stars .cg-star', function () {
+        const star = $(this);
+        const container = star.parent();
+        const imageId = parseInt(container.data('imageId'), 10);
+        const rating = parseInt(star.data('value'), 10);
+        if (!imageId || !rating) return;
+
+        sendRating(imageId, rating);
     });
 });

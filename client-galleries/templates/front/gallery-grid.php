@@ -17,7 +17,7 @@ $max = (int) cg_get_option('stars_max', 5);
             $full = wp_get_attachment_image_src($image_id, 'full');
             $alt = get_post_meta($image_id, '_wp_attachment_image_alt', true);
             ?>
-            <div class="cg-gallery-item" data-id="<?php echo esc_attr($image_id); ?>" data-index="<?php echo esc_attr($index); ?>" data-full="<?php echo esc_url($full ? $full[0] : ($src[0] ?? '')); ?>">
+            <div class="cg-gallery-item" data-id="<?php echo esc_attr($image_id); ?>" data-index="<?php echo esc_attr($index); ?>" data-full="<?php echo esc_url($full ? $full[0] : ($src[0] ?? '')); ?>" data-rating="<?php echo esc_attr($current); ?>">
                 <?php if ($src) : ?>
                     <img src="<?php echo esc_url($src[0]); ?>" loading="lazy" alt="<?php echo esc_attr($alt); ?>" />
                 <?php endif; ?>
