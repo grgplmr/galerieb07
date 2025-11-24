@@ -28,7 +28,9 @@ jQuery(function ($) {
         setCookie('cg_email_' + cgFront.galleryId, cgFront.email);
     }
 
-    const ratingsByImageId = Object.assign({}, cgFront.selection || {});
+    let ratingsByImageId = Object.assign({}, cgFront.selection || {});
+    let currentIndex = 0;
+    let items = [];
 
     function getRatingValue(value) {
         const parsed = parseInt(value, 10);
@@ -60,8 +62,8 @@ jQuery(function ($) {
     }
 
     function updateLightboxRatingDisplay(imageId, rating) {
-        if (!lightbox.stars || !lightbox.stars.length) return;
-        const currentId = parseInt(lightbox.stars.data('imageId'), 10);
+        if (!lightbox.stars || !lightbox.stars.length || !lightbox.el) return;
+        const currentId = parseInt(lightbox.el.dataset.imageId, 10);
         if (currentId !== imageId) return;
 
         lightbox.stars.attr('data-rating', rating);
@@ -73,9 +75,9 @@ jQuery(function ($) {
         updateGridStars(imageId, rating);
         updateLightboxRatingDisplay(imageId, rating);
 
-        const itemIndex = lightbox.items.findIndex((item) => item.id === imageId);
+        const itemIndex = items.findIndex((item) => item.image_id === imageId);
         if (itemIndex !== -1) {
-            lightbox.items[itemIndex].rating = rating;
+            items[itemIndex].rating = rating;
         }
     }
 
@@ -173,8 +175,9 @@ jQuery(function ($) {
     // Lightbox
     const lightbox = {
         overlay: null,
-        currentIndex: 0,
-        items: [],
+        image: null,
+        stars: null,
+        el: null,
     };
 
     function createLightbox() {
@@ -203,12 +206,12 @@ jQuery(function ($) {
 
         prevBtn.on('click', function (e) {
             e.preventDefault();
-            showImage(lightbox.currentIndex - 1);
+            renderLightbox(currentIndex - 1);
         });
 
         nextBtn.on('click', function (e) {
             e.preventDefault();
-            showImage(lightbox.currentIndex + 1);
+            renderLightbox(currentIndex + 1);
         });
 
         $(document).on('keydown', function (e) {
@@ -218,51 +221,56 @@ jQuery(function ($) {
             if (e.key === 'Escape') {
                 hideLightbox();
             } else if (e.key === 'ArrowLeft') {
-                showImage(lightbox.currentIndex - 1);
+                renderLightbox(currentIndex - 1);
             } else if (e.key === 'ArrowRight') {
-                showImage(lightbox.currentIndex + 1);
+                renderLightbox(currentIndex + 1);
             }
         });
 
         lightbox.overlay = overlay;
         lightbox.image = img;
         lightbox.stars = stars;
+        lightbox.el = overlay[0];
     }
 
     function collectItems() {
-        lightbox.items = [];
-        $('.cg-gallery-item').each(function (index) {
+        items = [];
+        $('.cg-gallery-item').each(function () {
             const item = $(this);
             const full = item.data('full');
             const imageId = parseInt(item.data('id'), 10);
             const itemRating = getRatingValue(item.data('rating')) || getRatingValue(item.find('.cg-stars').data('rating'));
             const currentRating = itemRating || getRatingValue(ratingsByImageId[imageId]);
             if (full && imageId) {
-                lightbox.items.push({
-                    full: full,
-                    id: imageId,
+                const itemIndex = items.length;
+                items.push({
+                    full_url: full,
+                    image_id: imageId,
                     rating: currentRating,
                 });
-                item.attr('data-index', index);
+                item.attr('data-index', itemIndex);
             }
         });
     }
 
-    function showImage(index) {
-        if (!lightbox.items.length) return;
+    function renderLightbox(index) {
+        if (!items.length || !lightbox.overlay) return;
         if (index < 0) {
-            index = lightbox.items.length - 1;
+            index = items.length - 1;
         }
-        if (index >= lightbox.items.length) {
+        if (index >= items.length) {
             index = 0;
         }
-        lightbox.currentIndex = index;
-        const currentItem = lightbox.items[index];
-        lightbox.currentItem = currentItem;
-        lightbox.image.attr('src', currentItem.full);
-        lightbox.stars.attr('data-image-id', currentItem.id);
-        lightbox.stars.attr('data-rating', currentItem.rating || 0);
-        renderStars(lightbox.stars, currentItem.rating || 0, cgFront.starsMax);
+        currentIndex = index;
+        const currentItem = items[currentIndex];
+        if (!currentItem) return;
+
+        const rating = getRatingValue(currentItem.rating) || getRatingValue(ratingsByImageId[currentItem.image_id]);
+        currentItem.rating = rating;
+        lightbox.image.attr('src', currentItem.full_url);
+        lightbox.stars.attr('data-rating', rating || 0);
+        lightbox.el.dataset.imageId = currentItem.image_id;
+        renderStars(lightbox.stars, rating || 0, cgFront.starsMax);
         lightbox.overlay.css('display', 'flex').show().focus();
     }
 
@@ -278,13 +286,13 @@ jQuery(function ($) {
         collectItems();
         const parent = $(this).closest('.cg-gallery-item');
         const index = parseInt(parent.data('index'), 10) || 0;
-        showImage(index);
+        renderLightbox(index);
     });
 
     $(document).on('click', '.cg-lightbox-stars .cg-star', function () {
+        if (!lightbox.el) return;
         const star = $(this);
-        const container = star.parent();
-        const imageId = parseInt(container.data('imageId'), 10);
+        const imageId = parseInt(lightbox.el.dataset.imageId, 10);
         const rating = parseInt(star.data('value'), 10);
         if (!imageId || !rating) return;
 
