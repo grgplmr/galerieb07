@@ -25,6 +25,8 @@ class CG_Ajax
         add_action('wp_ajax_cg_save_rating', [$this, 'save_rating']);
         add_action('wp_ajax_nopriv_cg_submit_selection', [$this, 'submit_selection']);
         add_action('wp_ajax_cg_submit_selection', [$this, 'submit_selection']);
+        add_action('wp_ajax_nopriv_cg_render_gallery', [$this, 'render_gallery']);
+        add_action('wp_ajax_cg_render_gallery', [$this, 'render_gallery']);
         add_action('wp_ajax_cg_export_csv', [$this, 'export_csv']);
     }
 
@@ -74,6 +76,32 @@ class CG_Ajax
         CG_Mailer::send_selection($gallery_id, $email, $rows);
 
         wp_send_json_success(['message' => __('Selection sent', 'client-galleries')]);
+    }
+
+    public function render_gallery(): void
+    {
+        $nonce = isset($_POST['nonce']) ? sanitize_text_field($_POST['nonce']) : '';
+        if (! CG_Security::verify_nonce($nonce, 'front_actions')) {
+            wp_send_json_error(__('Invalid nonce', 'client-galleries'));
+        }
+
+        $gallery_id = isset($_POST['gallery_id']) ? absint($_POST['gallery_id']) : 0;
+        $email = isset($_POST['email']) ? sanitize_email(wp_unslash($_POST['email'])) : '';
+        $cookie_key = isset($_POST['cookie_key']) ? sanitize_text_field(wp_unslash($_POST['cookie_key'])) : '';
+
+        if (! $gallery_id || ! $email || ! $cookie_key) {
+            wp_send_json_error(__('Missing data', 'client-galleries'));
+        }
+
+        $email = cg_normalize_email($email);
+        $html = CG_Shortcodes::instance()->render_gallery_markup($gallery_id, $email, $cookie_key);
+        $selection = CG_Shortcodes::instance()->get_gallery_data($gallery_id, $email)['selection'];
+
+        wp_send_json_success([
+            'html'      => $html,
+            'email'     => $email,
+            'selection' => $selection,
+        ]);
     }
 
     public function export_csv(): void
