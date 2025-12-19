@@ -14,7 +14,10 @@ jQuery(function ($) {
     const state = {
         items: [],
         uploading: false,
+        lastErrorMessage: '',
     };
+
+    addDebugInfo();
 
     fileInput.on('change', function () {
         const files = Array.from(this.files || []);
@@ -42,6 +45,7 @@ jQuery(function ($) {
                 file,
                 status: 'pending',
                 progress: 0,
+                attempts: 0,
             };
             state.items.push(item);
             renderQueueItem(item);
@@ -69,8 +73,12 @@ jQuery(function ($) {
         if (state.uploading) {
             return;
         }
+
+        const resumed = resumeFailedItems(source);
+        state.lastErrorMessage = '';
+
         if (!state.items.some((item) => item.status === 'pending')) {
-            setStatus(strings.noFiles || 'Select files first.');
+            setStatus(resumed ? strings.resuming || 'Resuming failed uploads...' : strings.noFiles || 'Select files first.');
             return;
         }
         setStatus(source === 'manual' ? strings.start || 'Starting upload...' : '');
@@ -88,6 +96,25 @@ jQuery(function ($) {
         uploadFile(next);
     }
 
+    function resumeFailedItems(source) {
+        if (source !== 'manual') {
+            return 0;
+        }
+        let reset = 0;
+        state.items.forEach((item) => {
+            if (item.status === 'error') {
+                reset++;
+                setItemStatus(item, 'pending');
+                setItemProgress(item, 0);
+                clearItemError(item);
+            }
+        });
+        if (reset) {
+            setStatus(strings.resuming || 'Resuming failed uploads...');
+        }
+        return reset;
+    }
+
     function uploadFile(item) {
         setItemStatus(item, 'uploading');
         setItemProgress(item, 0);
@@ -97,11 +124,12 @@ jQuery(function ($) {
         formData.append('action', 'cg_admin_upload_images');
         formData.append('nonce', config.nonce || '');
         formData.append('gallery_id', getGalleryId());
-        formData.append('cg_files[0]', item.file);
+        formData.append('file', item.file);
 
         const xhr = new XMLHttpRequest();
         xhr.open('POST', getAjaxUrl(), true);
         xhr.responseType = 'json';
+        item.attempts += 1;
 
         xhr.upload.onprogress = function (event) {
             if (!event.lengthComputable) {
@@ -113,33 +141,53 @@ jQuery(function ($) {
         };
 
         xhr.onerror = function () {
-            handleItemError(item, strings.networkError || 'Network error');
+            const message = formatErrorMessage(item, { status: xhr.status || 0, responseText: xhr.responseText }, strings.networkError || 'Network error');
+            handleItemError(item, message, { status: xhr.status || 0, responseText: xhr.responseText });
             finalizeFile();
         };
 
         xhr.onload = function () {
-            let resp = xhr.response;
-            if (!resp && xhr.responseText) {
-                try {
-                    resp = JSON.parse(xhr.responseText);
-                } catch (e) {
-                    resp = null;
-                }
-            }
-
-            if (xhr.status !== 200 || !resp) {
-                handleItemError(item, strings.serverError || 'Upload failed');
+            const parsed = parseResponse(xhr);
+            if (xhr.status !== 200) {
+                const message = formatErrorMessage(
+                    item,
+                    {
+                        status: xhr.status,
+                        responseText: parsed.rawText,
+                        message: parsed.message,
+                        code: parsed.code,
+                    },
+                    strings.serverError || 'Upload failed'
+                );
+                handleItemError(item, message, {
+                    status: xhr.status,
+                    responseText: parsed.rawText,
+                    code: parsed.code,
+                });
                 finalizeFile();
                 return;
             }
 
-            if (resp.success && resp.data && Array.isArray(resp.data.attachments)) {
+            if (parsed.payload && parsed.payload.success && parsed.payload.data && Array.isArray(parsed.payload.data.attachments)) {
                 setItemProgress(item, 1);
                 setItemStatus(item, 'completed');
-                appendAttachments(resp.data.attachments);
+                appendAttachments(parsed.payload.data.attachments);
             } else {
-                const message = resp.data && resp.data.message ? resp.data.message : (strings.serverError || 'Upload failed');
-                handleItemError(item, message);
+                const message = formatErrorMessage(
+                    item,
+                    {
+                        status: xhr.status,
+                        responseText: parsed.rawText,
+                        message: parsed.message || (parsed.payload && parsed.payload.data ? parsed.payload.data.message : ''),
+                        code: parsed.code,
+                    },
+                    strings.serverError || 'Upload failed'
+                );
+                handleItemError(item, message, {
+                    status: xhr.status,
+                    responseText: parsed.rawText,
+                    code: parsed.code,
+                });
             }
 
             finalizeFile();
@@ -154,13 +202,20 @@ jQuery(function ($) {
         }
     }
 
-    function handleItemError(item, message) {
+    function handleItemError(item, message, detail = {}) {
         setItemStatus(item, 'error');
         setItemProgress(item, 0);
 
         const row = queueList.find('[data-id="' + item.id + '"]');
         row.find('.cg-upload-error').text(message);
-        setStatus(message);
+        state.lastErrorMessage = message;
+        logErrorDetail(item, detail, message);
+        updateStats();
+    }
+
+    function clearItemError(item) {
+        const row = queueList.find('[data-id="' + item.id + '"]');
+        row.find('.cg-upload-error').text('');
     }
 
     function setItemStatus(item, status) {
@@ -213,18 +268,23 @@ jQuery(function ($) {
     function updateStats() {
         const successCount = state.items.filter((item) => item.status === 'completed').length;
         const errorCount = state.items.filter((item) => item.status === 'error').length;
-        if (!state.items.length) {
+        const total = state.items.length;
+        if (errorCount === 0) {
+            state.lastErrorMessage = '';
+        }
+        if (!total) {
             setStatus('');
             return;
         }
-        const summary = (strings.summary || 'Uploads:') + ' ' + successCount + ' completed, ' + errorCount + ' failed';
-        setStatus(summary);
+        const summary = formatSummary(successCount, errorCount, total);
+        const message = state.lastErrorMessage ? summary + ' — ' + state.lastErrorMessage : summary;
+        setStatus(message);
     }
 
     function finalizeAll() {
         state.uploading = false;
         startButton.prop('disabled', false);
-        setStatus(strings.completed || 'Uploads finished');
+        updateStats();
     }
 
     function resetQueueIfFinished() {
@@ -248,6 +308,115 @@ jQuery(function ($) {
             const img = $('<img />', { src: item.url, loading: 'lazy' });
             previewList.prepend(img);
         });
+    }
+
+    function parseResponse(xhr) {
+        let payload = xhr.response;
+        let rawText = xhr.responseText || '';
+        if (!payload && rawText) {
+            try {
+                payload = JSON.parse(rawText);
+            } catch (e) {
+                payload = null;
+            }
+        }
+        const message =
+            payload && payload.data && payload.data.message
+                ? payload.data.message
+                : payload && payload.message
+                    ? payload.message
+                    : '';
+        const code =
+            payload && payload.data && payload.data.code
+                ? payload.data.code
+                : payload && payload.code
+                    ? payload.code
+                    : '';
+        return { payload, rawText, message, code };
+    }
+
+    function formatSummary(successCount, errorCount, total) {
+        const template = strings.summaryFormat;
+        if (template && template.indexOf('%1$s') !== -1) {
+            return template.replace('%1$s', successCount).replace('%2$s', total).replace('%3$s', errorCount);
+        }
+        const label = strings.summary || 'Uploads';
+        return label + ': ' + successCount + '/' + total + ' successful - ' + errorCount + ' errors';
+    }
+
+    function formatErrorMessage(item, detail = {}, fallback = '') {
+        const fileLabel = strings.fileLabel || 'File';
+        const httpLabel = strings.httpStatus || 'HTTP status';
+        const responseLabel = strings.responseLabel || 'Response';
+        const parts = [];
+        if (item && item.file && item.file.name) {
+            parts.push(fileLabel + ': ' + item.file.name);
+        }
+        if (detail.status) {
+            parts.push(httpLabel + ': ' + detail.status);
+        }
+        if (detail.code) {
+            parts.push('Code: ' + detail.code);
+        }
+        const baseMessage = detail.message || fallback || '';
+        if (baseMessage) {
+            parts.push(baseMessage);
+        }
+        const responseText = detail.responseText || '';
+        const responseSnippet = responseText && responseText !== baseMessage ? responseLabel + ': ' + trimResponse(responseText) : '';
+        const limitHint = detectLimitHint(responseText || baseMessage);
+        if (responseSnippet) {
+            parts.push(responseSnippet);
+        }
+        if (limitHint) {
+            parts.push(limitHint);
+        }
+        return parts.filter(Boolean).join(' — ');
+    }
+
+    function detectLimitHint(text) {
+        if (!text) {
+            return '';
+        }
+        const lower = text.toLowerCase();
+        if (lower.includes('413') || lower.includes('request entity too large') || lower.includes('upload_max_filesize') || lower.includes('post_max_size')) {
+            const limitMessage = strings.limitHelp || 'Limite serveur atteinte: vérifier upload_max_filesize, post_max_size, max_file_uploads';
+            if (config.maxFileUploads) {
+                return limitMessage + ' (max_file_uploads: ' + config.maxFileUploads + ')';
+            }
+            return limitMessage;
+        }
+        return '';
+    }
+
+    function trimResponse(text) {
+        if (!text) {
+            return '';
+        }
+        return text.length > 250 ? text.slice(0, 250) + '…' : text;
+    }
+
+    function logErrorDetail(item, detail, message) {
+        const info = {
+            fileName: item && item.file ? item.file.name : '',
+            status: detail.status || 0,
+            code: detail.code || '',
+            responseText: detail.responseText || '',
+            message: message || detail.message || '',
+        };
+        // eslint-disable-next-line no-console
+        console.error('[CG upload] Upload failed', info);
+    }
+
+    function addDebugInfo() {
+        if (!statusMessage.length || !config.maxFileUploads) {
+            return;
+        }
+        const debugText = strings.maxFileUploads || ('max_file_uploads: ' + config.maxFileUploads);
+        if ($('#cg-upload-debug-info').length) {
+            return;
+        }
+        $('<p id="cg-upload-debug-info" class="cg-upload-debug" aria-live="polite"></p>').text(debugText).insertAfter(statusMessage);
     }
 
     function setStatus(message) {

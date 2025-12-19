@@ -17,43 +17,63 @@ class CG_Media
     public static function handle_upload(): void
     {
         if (! current_user_can('upload_files')) {
-            wp_send_json_error(__('Permission denied', 'client-galleries'));
+            self::send_error_response('permission_denied', __('Permission denied', 'client-galleries'), 403);
         }
 
         $nonce = isset($_POST['nonce']) ? sanitize_text_field($_POST['nonce']) : '';
         if (! CG_Security::verify_nonce($nonce, 'admin_upload')) {
-            wp_send_json_error(__('Invalid nonce', 'client-galleries'));
+            self::send_error_response('invalid_nonce', __('Invalid nonce', 'client-galleries'), 403);
         }
 
         $gallery_id = isset($_POST['gallery_id']) ? absint($_POST['gallery_id']) : 0;
         if (! $gallery_id) {
-            wp_send_json_error(__('Missing gallery', 'client-galleries'));
+            self::send_error_response('missing_gallery', __('Missing gallery', 'client-galleries'));
         }
 
-        $attachments = [];
-        if (! empty($_FILES['cg_files'])) {
-            require_once ABSPATH . 'wp-admin/includes/file.php';
-            require_once ABSPATH . 'wp-admin/includes/media.php';
-            require_once ABSPATH . 'wp-admin/includes/image.php';
-            $files = self::restructure_files_array($_FILES['cg_files']);
-            foreach ($files as $file) {
-                $attachment_id = media_handle_sideload($file, $gallery_id);
-                if (is_wp_error($attachment_id)) {
-                    continue;
-                }
+        if (empty($_FILES['file'])) {
+            self::send_error_response('missing_file', __('No file received', 'client-galleries'));
+        }
 
-                $path = get_attached_file($attachment_id);
-                self::resize_image($path);
-                wp_update_attachment_metadata($attachment_id, wp_generate_attachment_metadata($attachment_id, $path));
+        require_once ABSPATH . 'wp-admin/includes/file.php';
+        require_once ABSPATH . 'wp-admin/includes/media.php';
+        require_once ABSPATH . 'wp-admin/includes/image.php';
 
-                $attachments[] = [
+        $file = self::normalize_file($_FILES['file']);
+        if (empty($file['tmp_name'])) {
+            self::send_error_response('missing_tmp_name', __('Temporary file missing', 'client-galleries'));
+        }
+        if (UPLOAD_ERR_OK !== $file['error']) {
+            self::send_error_response(
+                'upload_error',
+                sprintf(__('Upload error (code %d)', 'client-galleries'), (int) $file['error'])
+            );
+        }
+
+        $attachment_id = media_handle_sideload($file, $gallery_id);
+        if (is_wp_error($attachment_id)) {
+            self::send_error_response(
+                $attachment_id->get_error_code() ?: 'upload_error',
+                $attachment_id->get_error_message(),
+                400,
+                [
+                    'error_data' => $attachment_id->get_error_data(),
+                ]
+            );
+        }
+
+        $path = get_attached_file($attachment_id);
+        self::resize_image($path);
+        wp_update_attachment_metadata($attachment_id, wp_generate_attachment_metadata($attachment_id, $path));
+
+        wp_send_json_success([
+            'attachments' => [
+                [
                     'id'  => $attachment_id,
                     'url' => wp_get_attachment_url($attachment_id),
-                ];
-            }
-        }
-
-        wp_send_json_success(['attachments' => $attachments]);
+                ],
+            ],
+            'debug'       => self::get_debug_info(),
+        ]);
     }
 
     public static function resize_image(string $path, int $max = 1024): void
@@ -71,17 +91,37 @@ class CG_Media
         $editor->save($path);
     }
 
-    private static function restructure_files_array(array $files): array
+    private static function normalize_file(array $file): array
     {
-        $output = [];
-        $file_count = count($files['name']);
-        $file_keys = array_keys($files);
-        for ($i = 0; $i < $file_count; $i++) {
-            foreach ($file_keys as $key) {
-                $output[$i][$key] = $files[$key][$i];
-            }
-        }
-        return $output;
+        return [
+            'name'     => isset($file['name']) ? sanitize_file_name($file['name']) : '',
+            'type'     => isset($file['type']) ? sanitize_mime_type($file['type']) : '',
+            'tmp_name' => isset($file['tmp_name']) ? $file['tmp_name'] : '',
+            'error'    => isset($file['error']) ? (int) $file['error'] : UPLOAD_ERR_NO_FILE,
+            'size'     => isset($file['size']) ? (int) $file['size'] : 0,
+        ];
+    }
+
+    private static function send_error_response(string $code, string $message, int $status = 400, array $data = []): void
+    {
+        $payload = array_merge(
+            [
+                'code'    => $code,
+                'message' => $message,
+                'debug'   => self::get_debug_info(),
+            ],
+            $data
+        );
+
+        wp_send_json_error($payload, $status);
+    }
+
+    private static function get_debug_info(): array
+    {
+        $max_file_uploads = ini_get('max_file_uploads');
+        return [
+            'max_file_uploads' => $max_file_uploads ? (int) $max_file_uploads : null,
+        ];
     }
 }
 CG_Media::hooks();
