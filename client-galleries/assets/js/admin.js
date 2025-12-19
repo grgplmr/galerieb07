@@ -1,22 +1,18 @@
 jQuery(function ($) {
-    const config = window.cgAdmin || window.CG_ADMIN || {};
+    const config = window.cgAdmin || {};
     const strings = config.strings || {};
-    config.strings = strings;
-    window.cgAdmin = config;
-    console.log('[CG] admin.js loaded', config);
 
     const fileInput = $('#cg-upload-input');
     const startButton = $('#cg-upload-start');
     const queueList = $('#cg-upload-queue');
-    const galleryList = $('#cg-gallery-previews');
+    const previewList = $('#cg-upload-list');
     const globalBar = $('#cg-upload-global-progress .cg-upload-progress-bar');
     const progressText = $('#cg-upload-progress-text');
     const progressCount = $('#cg-upload-progress-count');
-    const summary = $('#cg-upload-summary');
     const statusMessage = $('#cg-upload-status');
 
     const state = {
-        queue: [],
+        items: [],
         uploading: false,
     };
 
@@ -25,83 +21,68 @@ jQuery(function ($) {
         if (!files.length) {
             return;
         }
-
+        resetQueueIfFinished();
         addFilesToQueue(files);
-        fileInput.val('');
-        updateStats();
+        this.value = '';
         updateGlobalProgress();
         if (!state.uploading) {
-            startUploads();
+            startUploads('auto');
         }
     });
 
-    startButton.on('click', function () {
-        startUploads();
-    });
-
-    document.addEventListener('click', function (event) {
-        const btn = event.target.closest('#cg-upload-start');
-        if (!btn) {
-            return;
-        }
+    startButton.on('click', function (event) {
         event.preventDefault();
-        console.log('[CG] Start upload clicked');
-        if (statusMessage.length) {
-            statusMessage.text('Start upload clicked');
-        }
-        sendPing();
-        startUploads();
+        startUploads('manual');
     });
-
-    function startUploads() {
-        if (state.uploading) {
-            return;
-        }
-        if (!state.queue.some((item) => item.status === 'pending')) {
-            return;
-        }
-        state.uploading = true;
-        startButton.prop('disabled', true);
-        uploadNext();
-    }
 
     function addFilesToQueue(files) {
         files.forEach((file) => {
-            const id = 'cg-file-' + Date.now() + '-' + Math.random().toString(16).slice(2);
             const item = {
-                id,
+                id: 'cg-file-' + Date.now() + '-' + Math.random().toString(16).slice(2),
                 file,
                 status: 'pending',
                 progress: 0,
             };
-            state.queue.push(item);
+            state.items.push(item);
             renderQueueItem(item);
         });
+        updateStats();
     }
 
     function renderQueueItem(item) {
         const itemEl = $(
             '<li class="cg-upload-queue-item" data-id="' + item.id + '">' +
-            '<div class="cg-upload-queue-header">' +
-            '<span class="cg-upload-filename"></span>' +
-            '<span class="cg-upload-status" aria-live="polite"></span>' +
-            '</div>' +
-            '<div class="cg-upload-progress-file" aria-hidden="true"><span></span></div>' +
-            '<div class="cg-upload-error" role="alert"></div>' +
+                '<div class="cg-upload-queue-header">' +
+                    '<span class="cg-upload-filename"></span>' +
+                    '<span class="cg-upload-status" aria-live="polite"></span>' +
+                '</div>' +
+                '<div class="cg-upload-progress-file" aria-hidden="true"><span></span></div>' +
+                '<div class="cg-upload-error" role="alert"></div>' +
             '</li>'
         );
         itemEl.find('.cg-upload-filename').text(item.file.name);
-        itemEl.find('.cg-upload-status').text(strings.queued || strings.pending || 'Pending');
+        itemEl.find('.cg-upload-status').text(strings.pending || 'Pending');
         queueList.append(itemEl);
     }
 
+    function startUploads(source) {
+        if (state.uploading) {
+            return;
+        }
+        if (!state.items.some((item) => item.status === 'pending')) {
+            setStatus(strings.noFiles || 'Select files first.');
+            return;
+        }
+        setStatus(source === 'manual' ? strings.start || 'Starting upload...' : '');
+        state.uploading = true;
+        startButton.prop('disabled', true);
+        uploadNext();
+    }
+
     function uploadNext() {
-        const next = state.queue.find((item) => item.status === 'pending');
+        const next = state.items.find((item) => item.status === 'pending');
         if (!next) {
-            state.uploading = false;
-            startButton.prop('disabled', false);
-            updateStats();
-            updateGlobalProgress();
+            finalizeAll();
             return;
         }
         uploadFile(next);
@@ -113,13 +94,13 @@ jQuery(function ($) {
         updateGlobalProgress();
 
         const formData = new FormData();
-        formData.append('action', 'cg_admin_upload_single');
-        formData.append('_ajax_nonce', config.nonce_upload);
-        formData.append('gallery_id', config.gallery_id);
-        formData.append('file', item.file);
+        formData.append('action', 'cg_admin_upload_images');
+        formData.append('nonce', config.nonce || '');
+        formData.append('gallery_id', getGalleryId());
+        formData.append('cg_files[0]', item.file);
 
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', config.ajax_url, true);
+        xhr.open('POST', getAjaxUrl(), true);
         xhr.responseType = 'json';
 
         xhr.upload.onprogress = function (event) {
@@ -133,7 +114,7 @@ jQuery(function ($) {
 
         xhr.onerror = function () {
             handleItemError(item, strings.networkError || 'Network error');
-            finalizeUpload();
+            finalizeFile();
         };
 
         xhr.onload = function () {
@@ -148,29 +129,29 @@ jQuery(function ($) {
 
             if (xhr.status !== 200 || !resp) {
                 handleItemError(item, strings.serverError || 'Upload failed');
-                finalizeUpload();
+                finalizeFile();
                 return;
             }
 
-            if (resp.success) {
+            if (resp.success && resp.data && Array.isArray(resp.data.attachments)) {
                 setItemProgress(item, 1);
                 setItemStatus(item, 'completed');
-                appendThumbnail(resp.data);
+                appendAttachments(resp.data.attachments);
             } else {
-                const message = (resp.data && resp.data.message) ? resp.data.message : (strings.uploadError || 'Upload failed');
+                const message = resp.data && resp.data.message ? resp.data.message : (strings.serverError || 'Upload failed');
                 handleItemError(item, message);
             }
 
-            finalizeUpload();
+            finalizeFile();
         };
 
         xhr.send(formData);
-    }
 
-    function finalizeUpload() {
-        updateStats();
-        updateGlobalProgress();
-        setTimeout(uploadNext, 30);
+        function finalizeFile() {
+            updateStats();
+            updateGlobalProgress();
+            setTimeout(uploadNext, 30);
+        }
     }
 
     function handleItemError(item, message) {
@@ -179,6 +160,7 @@ jQuery(function ($) {
 
         const row = queueList.find('[data-id="' + item.id + '"]');
         row.find('.cg-upload-error').text(message);
+        setStatus(message);
     }
 
     function setItemStatus(item, status) {
@@ -198,7 +180,7 @@ jQuery(function ($) {
                 statusLabel.text(strings.error || 'Error');
                 break;
             default:
-                statusLabel.text(strings.queued || strings.pending || 'Pending');
+                statusLabel.text(strings.pending || 'Pending');
         }
     }
 
@@ -210,85 +192,82 @@ jQuery(function ($) {
     }
 
     function updateGlobalProgress() {
-        const total = state.queue.length || 1;
-        const completedPortion = state.queue.reduce((carry, item) => {
-            if (item.status === 'completed' || item.status === 'error') {
-                return carry + 1;
-            }
-            if (item.status === 'uploading') {
-                return carry + item.progress;
-            }
-            return carry;
-        }, 0);
-
-        const percent = Math.min(100, (completedPortion / total) * 100);
-        const finished = state.queue.filter((item) => item.status === 'completed' || item.status === 'error').length;
-
-        globalBar.css('width', percent + '%');
-        progressText.text(Math.round(percent) + '%');
-        progressCount.text(finished + ' / ' + state.queue.length);
-    }
-
-    function updateStats() {
-        if (!state.queue.length) {
-            summary.text('');
+        if (!state.items.length) {
             progressText.text('0%');
             progressCount.text('0 / 0');
             globalBar.css('width', '0%');
             return;
         }
 
-        const successCount = state.queue.filter((item) => item.status === 'completed').length;
-        const errorCount = state.queue.filter((item) => item.status === 'error').length;
-        summary.text(
-            (strings.summary || 'Uploads:') + ' ' +
-            successCount + ' ' + (strings.done || 'completed') + ', ' +
-            errorCount + ' ' + (strings.failed || 'failed')
-        );
+        const total = state.items.length;
+        const completed = state.items.filter((item) => item.status === 'completed' || item.status === 'error').length;
+        const current = state.items.find((item) => item.status === 'uploading');
+        const currentProgress = current ? current.progress : 0;
+        const percent = Math.min(100, ((completed + currentProgress) / total) * 100);
+
+        globalBar.css('width', percent + '%');
+        progressText.text(Math.round(percent) + '%');
+        progressCount.text(completed + ' / ' + total);
     }
 
-    function appendThumbnail(data) {
-        if (!data || (!data.thumb_url && !data.full_url)) {
+    function updateStats() {
+        const successCount = state.items.filter((item) => item.status === 'completed').length;
+        const errorCount = state.items.filter((item) => item.status === 'error').length;
+        if (!state.items.length) {
+            setStatus('');
             return;
         }
+        const summary = (strings.summary || 'Uploads:') + ' ' + successCount + ' completed, ' + errorCount + ' failed';
+        setStatus(summary);
+    }
 
-        const src = data.thumb_url || data.full_url;
-        const img = $('<img />', {
-            src: src,
-            alt: data.filename || '',
-            loading: 'lazy',
+    function finalizeAll() {
+        state.uploading = false;
+        startButton.prop('disabled', false);
+        setStatus(strings.completed || 'Uploads finished');
+    }
+
+    function resetQueueIfFinished() {
+        if (!state.items.length) {
+            return;
+        }
+        const allDone = state.items.every((item) => item.status === 'completed' || item.status === 'error');
+        if (allDone && !state.uploading) {
+            state.items = [];
+            queueList.empty();
+            updateGlobalProgress();
+            setStatus('');
+        }
+    }
+
+    function appendAttachments(attachments) {
+        attachments.forEach((item) => {
+            if (!item || !item.url) {
+                return;
+            }
+            const img = $('<img />', { src: item.url, loading: 'lazy' });
+            previewList.prepend(img);
         });
-        galleryList.prepend(img);
     }
 
-    function sendPing() {
-        const payload = new FormData();
-        payload.append('action', 'cg_admin_ping');
-        payload.append('nonce', config.nonce || '');
-        payload.append('post_id', config.post_id || 0);
-
-        const url = config.ajax_url || (typeof ajaxurl !== 'undefined' ? ajaxurl : '');
-        if (!url) {
-            console.warn('[CG] Missing ajax URL for ping');
+    function setStatus(message) {
+        if (!statusMessage.length) {
             return;
         }
+        statusMessage.text(message || '');
+    }
 
-        fetch(url, {
-            method: 'POST',
-            credentials: 'same-origin',
-            body: payload,
-        }).then((response) => response.json())
-            .then((data) => {
-                console.log('[CG] Ping response', data);
-                if (statusMessage.length) {
-                    statusMessage.text(data && data.success ? 'Ping OK' : 'Ping failed');
-                }
-            })
-            .catch((error) => {
-                console.error('[CG] Ping error', error);
-                if (statusMessage.length) {
-                    statusMessage.text('Ping error');
-                }
-            });
+    function getAjaxUrl() {
+        const url = config.ajaxUrl || config.ajax_url || (typeof ajaxurl !== 'undefined' ? ajaxurl : '');
+        if (!url) {
+            console.warn('[CG] Missing ajax URL for upload');
+        }
+        return url;
+    }
+
+    function getGalleryId() {
+        const fromConfig = config.galleryId || config.gallery_id || config.post_id;
+        const fromInput = fileInput.data('gallery');
+        return fromInput || fromConfig || '';
     }
 });

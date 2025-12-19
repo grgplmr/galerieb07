@@ -77,14 +77,7 @@ class CG_CPT_Gallery
         $post_type = $screen && $screen->post_type ? $screen->post_type : (isset($_GET['post_type']) ? sanitize_key($_GET['post_type']) : ''); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $is_gallery_screen = ('post.php' === $hook || 'post-new.php' === $hook) && ('client_gallery' === $post_type);
 
-        /**
-         * Allow forcing global enqueuing for diagnostics.
-         *
-         * Returning true will enqueue the admin assets on every admin page.
-         */
-        $force_global = (bool) apply_filters('cg_admin_force_global_enqueue', false);
-
-        if (! $force_global && ! $is_gallery_screen) {
+        if (! $is_gallery_screen) {
             return;
         }
 
@@ -95,28 +88,23 @@ class CG_CPT_Gallery
             $post_id = (int) $maybe_post->ID;
         }
         $localization = [
-            'ajax_url'     => admin_url('admin-ajax.php'),
-            'nonce_upload' => wp_create_nonce('cg_admin_upload_single'),
-            'nonce'        => wp_create_nonce('cg_admin_upload'),
-            'gallery_id'   => (int) $post_id,
-            'post_id'      => (int) $post_id,
-            'strings'      => [
+            'ajaxUrl'   => admin_url('admin-ajax.php'),
+            'ajax_url'  => admin_url('admin-ajax.php'),
+            'nonce'     => CG_Security::create_nonce('admin_upload'),
+            'galleryId' => (int) $post_id,
+            'gallery_id'=> (int) $post_id,
+            'strings'   => [
                 'pending'      => __('Pending', 'client-galleries'),
                 'uploading'    => __('Uploading', 'client-galleries'),
                 'completed'    => __('Completed', 'client-galleries'),
                 'error'        => __('Error', 'client-galleries'),
                 'networkError' => __('Network error', 'client-galleries'),
                 'serverError'  => __('Server error', 'client-galleries'),
-                'uploadError'  => __('Upload failed', 'client-galleries'),
-                'summary'      => __('Uploads:', 'client-galleries'),
-                'done'         => __('completed', 'client-galleries'),
-                'failed'       => __('failed', 'client-galleries'),
                 'start'        => __('Start upload', 'client-galleries'),
-                'queued'       => __('Queued', 'client-galleries'),
+                'summary'      => __('Uploads:', 'client-galleries'),
             ],
         ];
         wp_localize_script('cg-admin', 'cgAdmin', $localization);
-        wp_localize_script('cg-admin', 'CG_ADMIN', $localization);
     }
 
     public function render_metabox($post): void
