@@ -28,14 +28,12 @@ jQuery(function ($) {
         addFilesToQueue(files);
         this.value = '';
         updateGlobalProgress();
-        if (!state.uploading) {
-            startUploads('auto');
-        }
+        updateSelectionStatus();
     });
 
     startButton.on('click', function (event) {
         event.preventDefault();
-        startUploads('manual');
+        startUploads();
     });
 
     function addFilesToQueue(files) {
@@ -69,137 +67,124 @@ jQuery(function ($) {
         queueList.append(itemEl);
     }
 
-    function startUploads(source) {
+    function startUploads() {
         if (state.uploading) {
             return;
         }
 
-        const resumed = resumeFailedItems(source);
+        const pendingItems = state.items.filter((item) => item.status === 'pending');
         state.lastErrorMessage = '';
 
-        if (!state.items.some((item) => item.status === 'pending')) {
-            setStatus(resumed ? strings.resuming || 'Resuming failed uploads...' : strings.noFiles || 'Select files first.');
+        if (!pendingItems.length) {
+            setStatus(strings.noFiles || 'Select files first.');
             return;
         }
-        setStatus(source === 'manual' ? strings.start || 'Starting upload...' : '');
+
+        setStatus(strings.start || 'Starting upload...');
         state.uploading = true;
         startButton.prop('disabled', true);
-        uploadNext();
-    }
 
-    function uploadNext() {
-        const next = state.items.find((item) => item.status === 'pending');
-        if (!next) {
-            finalizeAll();
-            return;
-        }
-        uploadFile(next);
-    }
-
-    function resumeFailedItems(source) {
-        if (source !== 'manual') {
-            return 0;
-        }
-        let reset = 0;
-        state.items.forEach((item) => {
-            if (item.status === 'error') {
-                reset++;
-                setItemStatus(item, 'pending');
-                setItemProgress(item, 0);
-                clearItemError(item);
-            }
+        processUploadsSequentially(pendingItems).finally(() => {
+            state.uploading = false;
+            startButton.prop('disabled', false);
+            updateStats();
+            updateSelectionStatus();
         });
-        if (reset) {
-            setStatus(strings.resuming || 'Resuming failed uploads...');
-        }
-        return reset;
+    }
+
+    function processUploadsSequentially(items) {
+        return items.reduce((promise, item) => {
+            return promise.then(() => uploadFile(item));
+        }, Promise.resolve());
     }
 
     function uploadFile(item) {
-        setItemStatus(item, 'uploading');
-        setItemProgress(item, 0);
-        updateGlobalProgress();
-
-        const formData = new FormData();
-        formData.append('action', 'cg_admin_upload_images');
-        formData.append('nonce', config.nonce || '');
-        formData.append('gallery_id', getGalleryId());
-        formData.append('file', item.file);
-
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', getAjaxUrl(), true);
-        xhr.responseType = 'json';
-        item.attempts += 1;
-
-        xhr.upload.onprogress = function (event) {
-            if (!event.lengthComputable) {
-                return;
-            }
-            const percent = event.loaded / event.total;
-            setItemProgress(item, percent);
+        return new Promise((resolve) => {
+            setItemStatus(item, 'uploading');
+            setItemProgress(item, 0);
             updateGlobalProgress();
-        };
 
-        xhr.onerror = function () {
-            const message = formatErrorMessage(item, { status: xhr.status || 0, responseText: xhr.responseText }, strings.networkError || 'Network error');
-            handleItemError(item, message, { status: xhr.status || 0, responseText: xhr.responseText });
-            finalizeFile();
-        };
+            const formData = new FormData();
+            formData.append('action', 'cg_admin_upload_images');
+            formData.append('nonce', config.nonce || '');
+            formData.append('gallery_id', getGalleryId());
+            formData.append('file', item.file);
 
-        xhr.onload = function () {
-            const parsed = parseResponse(xhr);
-            if (xhr.status !== 200) {
-                const message = formatErrorMessage(
-                    item,
-                    {
-                        status: xhr.status,
-                        responseText: parsed.rawText,
-                        message: parsed.message,
-                        code: parsed.code,
-                    },
-                    strings.serverError || 'Upload failed'
-                );
-                handleItemError(item, message, {
-                    status: xhr.status,
-                    responseText: parsed.rawText,
-                    code: parsed.code,
-                });
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', getAjaxUrl(), true);
+            xhr.responseType = 'json';
+            item.attempts = (item.attempts || 0) + 1;
+
+            xhr.upload.onprogress = function (event) {
+                if (!event.lengthComputable) {
+                    return;
+                }
+                const percent = event.loaded / event.total;
+                setItemProgress(item, percent);
+                updateGlobalProgress();
+            };
+
+            xhr.onerror = function () {
+                const message = formatErrorMessage(item, { status: xhr.status || 0, responseText: xhr.responseText }, strings.networkError || 'Network error');
+                handleItemError(item, message, { status: xhr.status || 0, responseText: xhr.responseText });
                 finalizeFile();
-                return;
-            }
+            };
 
-            if (parsed.payload && parsed.payload.success && parsed.payload.data && Array.isArray(parsed.payload.data.attachments)) {
-                setItemProgress(item, 1);
-                setItemStatus(item, 'completed');
-                appendAttachments(parsed.payload.data.attachments);
-            } else {
-                const message = formatErrorMessage(
-                    item,
-                    {
+            xhr.onload = function () {
+                const parsed = parseResponse(xhr);
+                if (xhr.status !== 200) {
+                    const message = formatErrorMessage(
+                        item,
+                        {
+                            status: xhr.status,
+                            responseText: parsed.rawText,
+                            message: parsed.message,
+                            code: parsed.code,
+                        },
+                        strings.serverError || 'Upload failed'
+                    );
+                    handleItemError(item, message, {
                         status: xhr.status,
                         responseText: parsed.rawText,
-                        message: parsed.message || (parsed.payload && parsed.payload.data ? parsed.payload.data.message : ''),
                         code: parsed.code,
-                    },
-                    strings.serverError || 'Upload failed'
-                );
-                handleItemError(item, message, {
-                    status: xhr.status,
-                    responseText: parsed.rawText,
-                    code: parsed.code,
-                });
+                    });
+                    finalizeFile();
+                    return;
+                }
+
+                if (parsed.payload && parsed.payload.success && parsed.payload.data && Array.isArray(parsed.payload.data.attachments)) {
+                    setItemProgress(item, 1);
+                    setItemStatus(item, 'completed');
+                    appendAttachments(parsed.payload.data.attachments);
+                } else {
+                    const message = formatErrorMessage(
+                        item,
+                        {
+                            status: xhr.status,
+                            responseText: parsed.rawText,
+                            message: parsed.message || (parsed.payload && parsed.payload.data ? parsed.payload.data.message : ''),
+                            code: parsed.code,
+                        },
+                        strings.serverError || 'Upload failed'
+                    );
+                    handleItemError(item, message, {
+                        status: xhr.status,
+                        responseText: parsed.rawText,
+                        code: parsed.code,
+                    });
+                }
+
+                finalizeFile();
+            };
+
+            xhr.send(formData);
+
+            function finalizeFile() {
+                updateStats();
+                updateGlobalProgress();
+                resolve();
             }
-
-            finalizeFile();
-        };
-
-        xhr.send(formData);
-
-        function finalizeFile() {
-            updateStats();
-            updateGlobalProgress();
-            setTimeout(uploadNext, 30);
-        }
+        });
     }
 
     function handleItemError(item, message, detail = {}) {
@@ -269,6 +254,7 @@ jQuery(function ($) {
         const successCount = state.items.filter((item) => item.status === 'completed').length;
         const errorCount = state.items.filter((item) => item.status === 'error').length;
         const total = state.items.length;
+        const pendingCount = state.items.filter((item) => item.status === 'pending').length;
         if (errorCount === 0) {
             state.lastErrorMessage = '';
         }
@@ -276,14 +262,28 @@ jQuery(function ($) {
             setStatus('');
             return;
         }
+        if (!state.uploading && pendingCount === total) {
+            setStatus(formatReadyMessage(pendingCount));
+            return;
+        }
         const summary = formatSummary(successCount, errorCount, total);
         const message = state.lastErrorMessage ? summary + ' — ' + state.lastErrorMessage : summary;
         setStatus(message);
     }
 
-    function finalizeAll() {
-        state.uploading = false;
-        startButton.prop('disabled', false);
+    function updateSelectionStatus() {
+        if (state.uploading) {
+            return;
+        }
+        const pendingCount = state.items.filter((item) => item.status === 'pending').length;
+        if (!state.items.length) {
+            setStatus('');
+            return;
+        }
+        if (pendingCount) {
+            setStatus(formatReadyMessage(pendingCount));
+            return;
+        }
         updateStats();
     }
 
@@ -342,6 +342,11 @@ jQuery(function ($) {
         }
         const label = strings.summary || 'Uploads';
         return label + ': ' + successCount + '/' + total + ' successful - ' + errorCount + ' errors';
+    }
+
+    function formatReadyMessage(count) {
+        const template = strings.ready || '%s files ready. Click Start upload.';
+        return template.replace('%s', count);
     }
 
     function formatErrorMessage(item, detail = {}, fallback = '') {
