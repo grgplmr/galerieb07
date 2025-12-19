@@ -18,6 +18,8 @@ class CG_Plugin {
         add_action( 'add_meta_boxes', array( 'CG_Metabox', 'register' ) );
         add_action( 'save_post_client_gallery', array( 'CG_Metabox', 'save' ) );
         add_action( 'admin_enqueue_scripts', array( 'CG_Metabox', 'enqueue' ) );
+        add_action( 'admin_head-post.php', array( 'CG_Metabox', 'cleanup_metaboxes' ) );
+        add_action( 'admin_head-post-new.php', array( 'CG_Metabox', 'cleanup_metaboxes' ) );
 
         add_action( 'wp_ajax_cg_admin_upload_single', array( 'CG_Ajax_Admin', 'upload_single' ) );
 
