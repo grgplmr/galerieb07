@@ -76,6 +76,7 @@ class CG_CPT_Gallery
         $post_id = isset($_GET['post']) ? absint($_GET['post']) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $post_type = $screen && $screen->post_type ? $screen->post_type : (isset($_GET['post_type']) ? sanitize_key($_GET['post_type']) : ''); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
         $is_gallery_screen = ('post.php' === $hook || 'post-new.php' === $hook) && ('client_gallery' === $post_type);
+        $max_file_uploads = ini_get('max_file_uploads');
 
         if (! $is_gallery_screen) {
             return;
@@ -88,20 +89,28 @@ class CG_CPT_Gallery
             $post_id = (int) $maybe_post->ID;
         }
         $localization = [
-            'ajaxUrl'   => admin_url('admin-ajax.php'),
-            'ajax_url'  => admin_url('admin-ajax.php'),
-            'nonce'     => CG_Security::create_nonce('admin_upload'),
-            'galleryId' => (int) $post_id,
-            'gallery_id'=> (int) $post_id,
-            'strings'   => [
-                'pending'      => __('Pending', 'client-galleries'),
-                'uploading'    => __('Uploading', 'client-galleries'),
-                'completed'    => __('Completed', 'client-galleries'),
-                'error'        => __('Error', 'client-galleries'),
-                'networkError' => __('Network error', 'client-galleries'),
-                'serverError'  => __('Server error', 'client-galleries'),
-                'start'        => __('Start upload', 'client-galleries'),
-                'summary'      => __('Uploads:', 'client-galleries'),
+            'ajaxUrl'         => admin_url('admin-ajax.php'),
+            'ajax_url'        => admin_url('admin-ajax.php'),
+            'nonce'           => CG_Security::create_nonce('admin_upload'),
+            'galleryId'       => (int) $post_id,
+            'gallery_id'      => (int) $post_id,
+            'maxFileUploads'  => $max_file_uploads ? (int) $max_file_uploads : null,
+            'strings'         => [
+                'pending'        => __('Pending', 'client-galleries'),
+                'uploading'      => __('Uploading', 'client-galleries'),
+                'completed'      => __('Completed', 'client-galleries'),
+                'error'          => __('Error', 'client-galleries'),
+                'networkError'   => __('Network error', 'client-galleries'),
+                'serverError'    => __('Upload failed', 'client-galleries'),
+                'start'          => __('Start upload', 'client-galleries'),
+                'summary'        => __('Uploads', 'client-galleries'),
+                'summaryFormat'  => __('%1$s/%2$s successful - %3$s errors', 'client-galleries'),
+                'resuming'       => __('Resuming failed uploads...', 'client-galleries'),
+                'limitHelp'      => __('Server limit reached: check upload_max_filesize, post_max_size, max_file_uploads', 'client-galleries'),
+                'httpStatus'     => __('HTTP status', 'client-galleries'),
+                'responseLabel'  => __('Response', 'client-galleries'),
+                'fileLabel'      => __('File', 'client-galleries'),
+                'maxFileUploads' => $max_file_uploads ? sprintf(__('max_file_uploads: %d', 'client-galleries'), (int) $max_file_uploads) : '',
             ],
         ];
         wp_localize_script('cg-admin', 'cgAdmin', $localization);
