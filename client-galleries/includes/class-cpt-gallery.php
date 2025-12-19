@@ -72,32 +72,51 @@ class CG_CPT_Gallery
 
     public function enqueue_admin(string $hook): void
     {
-        global $post;
-        if ('post.php' === $hook || 'post-new.php' === $hook) {
-            if ($post && 'client_gallery' === $post->post_type) {
-                wp_enqueue_style('cg-admin');
-                wp_enqueue_script('cg-admin');
-                wp_localize_script('cg-admin', 'cgAdmin', [
-                    'ajax_url'    => admin_url('admin-ajax.php'),
-                    'nonce_upload'=> wp_create_nonce('cg_admin_upload_single'),
-                    'gallery_id'  => (int) $post->ID,
-                    'strings'     => [
-                        'pending'     => __('Pending', 'client-galleries'),
-                        'uploading'   => __('Uploading', 'client-galleries'),
-                        'completed'   => __('Completed', 'client-galleries'),
-                        'error'       => __('Error', 'client-galleries'),
-                        'networkError'=> __('Network error', 'client-galleries'),
-                        'serverError' => __('Server error', 'client-galleries'),
-                        'uploadError' => __('Upload failed', 'client-galleries'),
-                        'summary'     => __('Uploads:', 'client-galleries'),
-                        'done'        => __('completed', 'client-galleries'),
-                        'failed'      => __('failed', 'client-galleries'),
-                        'start'       => __('Start upload', 'client-galleries'),
-                        'queued'      => __('Queued', 'client-galleries'),
-                    ],
-                ]);
-            }
+        $screen = function_exists('get_current_screen') ? get_current_screen() : null;
+        $post_id = isset($_GET['post']) ? absint($_GET['post']) : 0; // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $post_type = $screen && $screen->post_type ? $screen->post_type : (isset($_GET['post_type']) ? sanitize_key($_GET['post_type']) : ''); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        $is_gallery_screen = ('post.php' === $hook || 'post-new.php' === $hook) && ('client_gallery' === $post_type);
+
+        /**
+         * Allow forcing global enqueuing for diagnostics.
+         *
+         * Returning true will enqueue the admin assets on every admin page.
+         */
+        $force_global = (bool) apply_filters('cg_admin_force_global_enqueue', false);
+
+        if (! $force_global && ! $is_gallery_screen) {
+            return;
         }
+
+        wp_enqueue_style('cg-admin');
+        wp_enqueue_script('cg-admin');
+        $maybe_post = isset($GLOBALS['post']) && $GLOBALS['post'] instanceof WP_Post ? $GLOBALS['post'] : null;
+        if (! $post_id && $maybe_post && 'client_gallery' === $maybe_post->post_type) {
+            $post_id = (int) $maybe_post->ID;
+        }
+        $localization = [
+            'ajax_url'     => admin_url('admin-ajax.php'),
+            'nonce_upload' => wp_create_nonce('cg_admin_upload_single'),
+            'nonce'        => wp_create_nonce('cg_admin_upload'),
+            'gallery_id'   => (int) $post_id,
+            'post_id'      => (int) $post_id,
+            'strings'      => [
+                'pending'      => __('Pending', 'client-galleries'),
+                'uploading'    => __('Uploading', 'client-galleries'),
+                'completed'    => __('Completed', 'client-galleries'),
+                'error'        => __('Error', 'client-galleries'),
+                'networkError' => __('Network error', 'client-galleries'),
+                'serverError'  => __('Server error', 'client-galleries'),
+                'uploadError'  => __('Upload failed', 'client-galleries'),
+                'summary'      => __('Uploads:', 'client-galleries'),
+                'done'         => __('completed', 'client-galleries'),
+                'failed'       => __('failed', 'client-galleries'),
+                'start'        => __('Start upload', 'client-galleries'),
+                'queued'       => __('Queued', 'client-galleries'),
+            ],
+        ];
+        wp_localize_script('cg-admin', 'cgAdmin', $localization);
+        wp_localize_script('cg-admin', 'CG_ADMIN', $localization);
     }
 
     public function render_metabox($post): void
