@@ -18,9 +18,28 @@ class CG_Metabox {
         // Validation: Step 5 metabox UI affichée
     }
 
+    public static function cleanup_metaboxes() {
+        $screen    = function_exists( 'get_current_screen' ) ? get_current_screen() : null;
+        $post_type = $screen ? $screen->post_type : '';
+
+        if ( empty( $post_type ) && isset( $_GET['post_type'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+            $post_type = sanitize_key( wp_unslash( $_GET['post_type'] ) ); // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+        }
+
+        if ( CG_CPT::POST_TYPE !== $post_type ) {
+            return;
+        }
+
+        remove_meta_box( 'slugdiv', CG_CPT::POST_TYPE, 'normal' );
+        remove_meta_box( 'slugdiv', CG_CPT::POST_TYPE, 'side' );
+        remove_meta_box( 'commentstatusdiv', CG_CPT::POST_TYPE, 'normal' );
+        remove_meta_box( 'commentsdiv', CG_CPT::POST_TYPE, 'normal' );
+    }
+
     public static function render( $post ) {
         wp_nonce_field( 'cg_metabox_nonce', 'cg_metabox_nonce_field' );
-        $token = CG_Security::get_token( $post->ID );
+        $is_new = empty( $post->ID ) || 'auto-draft' === $post->post_status;
+        $token  = $is_new ? '' : CG_Security::get_token( $post->ID );
         include CG_PLUGIN_DIR . 'templates/admin/metabox-gallery.php';
     }
 
@@ -45,6 +64,8 @@ class CG_Metabox {
         if ( ! $post || CG_CPT::POST_TYPE !== $post->post_type ) {
             return;
         }
+        $is_new = empty( $post->ID ) || 'auto-draft' === $post->post_status;
+        $token  = $is_new ? '' : CG_Security::get_token( $post->ID );
 
         wp_enqueue_style( 'cg-admin', CG_PLUGIN_URL . 'assets/admin/admin.css', array(), CG_VERSION );
         wp_enqueue_script( 'cg-admin', CG_PLUGIN_URL . 'assets/admin/admin.js', array( 'jquery' ), CG_VERSION, true );
@@ -56,7 +77,7 @@ class CG_Metabox {
                 'nonce'   => wp_create_nonce( 'cg_admin_upload' ),
                 'gallery' => array(
                     'id'    => $post->ID,
-                    'token' => CG_Security::get_token( $post->ID ),
+                    'token' => $token,
                 ),
                 'existing' => self::get_existing_attachments( $post->ID ),
                 'strings' => array(

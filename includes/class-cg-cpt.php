@@ -26,7 +26,7 @@ class CG_CPT {
             'show_in_menu'       => true,
             'capability_type'    => 'post',
             'hierarchical'       => false,
-            'supports'           => array( 'title', 'editor' ),
+            'supports'           => array( 'title' ),
             'menu_position'      => 20,
             'menu_icon'          => 'dashicons-format-gallery',
             'rewrite'            => false,
