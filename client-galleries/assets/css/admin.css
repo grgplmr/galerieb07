@@ -2,12 +2,6 @@
     margin-bottom: 1em;
 }
 
-.cg-upload-area {
-    padding: 12px;
-    border: 1px dashed #ccc;
-    background: #fafafa;
-}
-
 .cg-upload-controls {
     display: flex;
     gap: 8px;
@@ -102,18 +96,24 @@
     font-size: 12px;
 }
 
-#cg-gallery-previews {
+.cg-upload-list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
     gap: 8px;
     margin-top: 10px;
 }
 
-#cg-gallery-previews img {
+.cg-upload-list img {
     width: 100%;
     height: auto;
     display: block;
     border-radius: 3px;
     background: #fff;
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+}
+
+.cg-upload-area {
+    padding: 12px;
+    border: 1px dashed #ccc;
+    background: #fafafa;
 }

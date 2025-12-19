@@ -11,14 +11,10 @@ class CG_Media
 {
     public static function hooks(): void
     {
-        add_action('wp_ajax_cg_admin_upload_images', [__CLASS__, 'handle_upload_legacy']);
-        add_action('wp_ajax_cg_admin_upload_single', [__CLASS__, 'handle_upload_single']);
+        add_action('wp_ajax_cg_admin_upload_images', [__CLASS__, 'handle_upload']);
     }
 
-    /**
-     * Legacy multi-file handler. Kept for backward compatibility.
-     */
-    public static function handle_upload_legacy(): void
+    public static function handle_upload(): void
     {
         if (! current_user_can('upload_files')) {
             wp_send_json_error(__('Permission denied', 'client-galleries'));
@@ -58,54 +54,6 @@ class CG_Media
         }
 
         wp_send_json_success(['attachments' => $attachments]);
-    }
-
-    public static function handle_upload_single(): void
-    {
-        if (! current_user_can('upload_files')) {
-            wp_send_json_error(['message' => __('Permission denied', 'client-galleries')]);
-        }
-
-        $nonce = isset($_POST['_ajax_nonce']) ? sanitize_text_field(wp_unslash($_POST['_ajax_nonce'])) : '';
-        if (! wp_verify_nonce($nonce, 'cg_admin_upload_single')) {
-            wp_send_json_error(['message' => __('Invalid nonce', 'client-galleries')]);
-        }
-
-        $gallery_id = isset($_POST['gallery_id']) ? absint($_POST['gallery_id']) : 0;
-        if (! $gallery_id) {
-            wp_send_json_error(['message' => __('Missing gallery', 'client-galleries')]);
-        }
-
-        if (! current_user_can('edit_post', $gallery_id)) {
-            wp_send_json_error(['message' => __('You cannot edit this gallery.', 'client-galleries')]);
-        }
-
-        if (empty($_FILES['file'])) {
-            wp_send_json_error(['message' => __('No file received.', 'client-galleries')]);
-        }
-
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-        require_once ABSPATH . 'wp-admin/includes/media.php';
-        require_once ABSPATH . 'wp-admin/includes/image.php';
-
-        $attachment_id = media_handle_upload('file', $gallery_id);
-        if (is_wp_error($attachment_id)) {
-            wp_send_json_error(['message' => $attachment_id->get_error_message()]);
-        }
-
-        $path = get_attached_file($attachment_id);
-        self::resize_image($path);
-        wp_update_attachment_metadata($attachment_id, wp_generate_attachment_metadata($attachment_id, $path));
-
-        $thumb = wp_get_attachment_image_src($attachment_id, 'thumbnail') ?: wp_get_attachment_image_src($attachment_id, 'medium');
-        $full_url = wp_get_attachment_url($attachment_id);
-
-        wp_send_json_success([
-            'attachment_id' => $attachment_id,
-            'thumb_url'     => $thumb ? $thumb[0] : $full_url,
-            'full_url'      => $full_url,
-            'filename'      => get_the_title($attachment_id),
-        ]);
     }
 
     public static function resize_image(string $path, int $max = 1024): void
