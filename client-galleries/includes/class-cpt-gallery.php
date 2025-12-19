@@ -78,9 +78,10 @@ class CG_CPT_Gallery
                 wp_enqueue_style('cg-admin');
                 wp_enqueue_script('cg-admin');
                 wp_localize_script('cg-admin', 'cgAdmin', [
-                    'ajaxUrl' => admin_url('admin-ajax.php'),
-                    'nonce'   => CG_Security::create_nonce('admin_upload'),
-                    'strings' => [
+                    'ajax_url'    => admin_url('admin-ajax.php'),
+                    'nonce_upload'=> wp_create_nonce('cg_admin_upload_single'),
+                    'gallery_id'  => (int) $post->ID,
+                    'strings'     => [
                         'pending'     => __('Pending', 'client-galleries'),
                         'uploading'   => __('Uploading', 'client-galleries'),
                         'completed'   => __('Completed', 'client-galleries'),
@@ -91,6 +92,8 @@ class CG_CPT_Gallery
                         'summary'     => __('Uploads:', 'client-galleries'),
                         'done'        => __('completed', 'client-galleries'),
                         'failed'      => __('failed', 'client-galleries'),
+                        'start'       => __('Start upload', 'client-galleries'),
+                        'queued'      => __('Queued', 'client-galleries'),
                     ],
                 ]);
             }

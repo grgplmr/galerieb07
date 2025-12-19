@@ -8,19 +8,27 @@
     background: #fafafa;
 }
 
-.cg-upload-progress-wrapper {
-    margin: 10px 0;
+.cg-upload-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-top: 6px;
 }
 
-.cg-upload-progress-bar-container {
+.cg-upload-progress {
+    margin: 12px 0;
+}
+
+.cg-upload-progress-track {
     background: #e5e5e5;
     border-radius: 4px;
     overflow: hidden;
-    height: 10px;
+    height: 12px;
+    position: relative;
 }
 
 .cg-upload-progress-bar {
-    background: #007cba;
+    background: linear-gradient(90deg, #007cba, #46b450);
     height: 100%;
     width: 0%;
     transition: width 0.2s ease;
@@ -68,7 +76,7 @@
     height: 100%;
     background: #46b450;
     width: 0%;
-    transition: width 0.15s ease;
+    transition: width 0.2s ease;
 }
 
 .cg-upload-status {
@@ -94,15 +102,18 @@
     font-size: 12px;
 }
 
-.cg-upload-list img {
-    max-width: 100px;
-    height: auto;
-    margin-right: 8px;
-    margin-bottom: 8px;
+#cg-gallery-previews {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+    gap: 8px;
+    margin-top: 10px;
 }
 
-.cg-upload-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+#cg-gallery-previews img {
+    width: 100%;
+    height: auto;
+    display: block;
+    border-radius: 3px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
 }

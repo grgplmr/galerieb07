@@ -1,19 +1,16 @@
 jQuery(function ($) {
     const fileInput = $('#cg-upload-input');
+    const startButton = $('#cg-upload-start');
     const queueList = $('#cg-upload-queue');
-    const galleryList = $('#cg-upload-gallery');
-    const progressBar = $('#cg-upload-progress-bar');
+    const galleryList = $('#cg-gallery-previews');
+    const globalBar = $('#cg-upload-global-progress .cg-upload-progress-bar');
     const progressText = $('#cg-upload-progress-text');
     const progressCount = $('#cg-upload-progress-count');
     const summary = $('#cg-upload-summary');
 
-    let queue = [];
-    let isUploading = false;
-    let stats = {
-        total: 0,
-        completed: 0,
-        success: 0,
-        error: 0,
+    const state = {
+        queue: [],
+        uploading: false,
     };
 
     fileInput.on('change', function () {
@@ -22,27 +19,48 @@ jQuery(function ($) {
             return;
         }
 
-        files.forEach((file) => enqueueFile(file));
+        addFilesToQueue(files);
         fileInput.val('');
-        updateSummary();
-
-        if (!isUploading) {
-            uploadNext();
+        updateStats();
+        updateGlobalProgress();
+        if (!state.uploading) {
+            startUploads();
         }
     });
 
-    function enqueueFile(file) {
-        const id = 'cg-file-' + Date.now() + '-' + Math.random().toString(16).slice(2);
-        queue.push({
-            id,
-            file,
-            status: 'pending',
-            progress: 0,
-        });
-        stats.total += 1;
+    startButton.on('click', function () {
+        startUploads();
+    });
 
-        const item = $(
-            '<li class="cg-upload-queue-item" data-id="' + id + '">' +
+    function startUploads() {
+        if (state.uploading) {
+            return;
+        }
+        if (!state.queue.some((item) => item.status === 'pending')) {
+            return;
+        }
+        state.uploading = true;
+        startButton.prop('disabled', true);
+        uploadNext();
+    }
+
+    function addFilesToQueue(files) {
+        files.forEach((file) => {
+            const id = 'cg-file-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+            const item = {
+                id,
+                file,
+                status: 'pending',
+                progress: 0,
+            };
+            state.queue.push(item);
+            renderQueueItem(item);
+        });
+    }
+
+    function renderQueueItem(item) {
+        const itemEl = $(
+            '<li class="cg-upload-queue-item" data-id="' + item.id + '">' +
             '<div class="cg-upload-queue-header">' +
             '<span class="cg-upload-filename"></span>' +
             '<span class="cg-upload-status" aria-live="polite"></span>' +
@@ -51,35 +69,36 @@ jQuery(function ($) {
             '<div class="cg-upload-error" role="alert"></div>' +
             '</li>'
         );
-        item.find('.cg-upload-filename').text(file.name);
-        item.find('.cg-upload-status').text(cgAdmin.strings.pending || 'Pending');
-        queueList.append(item);
-        updateGlobalProgress();
+        itemEl.find('.cg-upload-filename').text(item.file.name);
+        itemEl.find('.cg-upload-status').text(cgAdmin.strings.queued || cgAdmin.strings.pending || 'Pending');
+        queueList.append(itemEl);
     }
 
     function uploadNext() {
-        const next = queue.find((item) => item.status === 'pending');
+        const next = state.queue.find((item) => item.status === 'pending');
         if (!next) {
-            isUploading = false;
-            updateSummary();
+            state.uploading = false;
+            startButton.prop('disabled', false);
+            updateStats();
+            updateGlobalProgress();
             return;
         }
-        isUploading = true;
         uploadFile(next);
     }
 
     function uploadFile(item) {
         setItemStatus(item, 'uploading');
         setItemProgress(item, 0);
+        updateGlobalProgress();
 
         const formData = new FormData();
         formData.append('action', 'cg_admin_upload_single');
-        formData.append('nonce', cgAdmin.nonce);
-        formData.append('gallery_id', fileInput.data('gallery'));
-        formData.append('cg_file', item.file);
+        formData.append('_ajax_nonce', cgAdmin.nonce_upload);
+        formData.append('gallery_id', cgAdmin.gallery_id);
+        formData.append('file', item.file);
 
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', cgAdmin.ajaxUrl, true);
+        xhr.open('POST', cgAdmin.ajax_url, true);
         xhr.responseType = 'json';
 
         xhr.upload.onprogress = function (event) {
@@ -93,46 +112,52 @@ jQuery(function ($) {
 
         xhr.onerror = function () {
             handleItemError(item, cgAdmin.strings.networkError || 'Network error');
-            updateSummary();
-            setTimeout(uploadNext, 20);
+            finalizeUpload();
         };
 
         xhr.onload = function () {
-            const resp = xhr.response;
+            let resp = xhr.response;
+            if (!resp && xhr.responseText) {
+                try {
+                    resp = JSON.parse(xhr.responseText);
+                } catch (e) {
+                    resp = null;
+                }
+            }
+
             if (xhr.status !== 200 || !resp) {
                 handleItemError(item, cgAdmin.strings.serverError || 'Upload failed');
+                finalizeUpload();
                 return;
             }
 
             if (resp.success) {
-                item.progress = 1;
                 setItemProgress(item, 1);
                 setItemStatus(item, 'completed');
-                stats.success += 1;
-                stats.completed += 1;
                 appendThumbnail(resp.data);
             } else {
                 const message = (resp.data && resp.data.message) ? resp.data.message : (cgAdmin.strings.uploadError || 'Upload failed');
                 handleItemError(item, message);
             }
 
-            updateGlobalProgress();
-            updateSummary();
-            setTimeout(uploadNext, 20);
+            finalizeUpload();
         };
 
         xhr.send(formData);
     }
 
+    function finalizeUpload() {
+        updateStats();
+        updateGlobalProgress();
+        setTimeout(uploadNext, 30);
+    }
+
     function handleItemError(item, message) {
         setItemStatus(item, 'error');
         setItemProgress(item, 0);
-        stats.error += 1;
-        stats.completed += 1;
 
         const row = queueList.find('[data-id="' + item.id + '"]');
         row.find('.cg-upload-error').text(message);
-        updateGlobalProgress();
     }
 
     function setItemStatus(item, status) {
@@ -152,7 +177,7 @@ jQuery(function ($) {
                 statusLabel.text(cgAdmin.strings.error || 'Error');
                 break;
             default:
-                statusLabel.text(cgAdmin.strings.pending || 'Pending');
+                statusLabel.text(cgAdmin.strings.queued || cgAdmin.strings.pending || 'Pending');
         }
     }
 
@@ -164,25 +189,40 @@ jQuery(function ($) {
     }
 
     function updateGlobalProgress() {
-        const current = queue.find((item) => item.status === 'uploading');
-        const currentProgress = current ? current.progress : 0;
-        const total = stats.total || 1;
-        const percent = ((stats.completed + currentProgress) / total) * 100;
+        const total = state.queue.length || 1;
+        const completedPortion = state.queue.reduce((carry, item) => {
+            if (item.status === 'completed' || item.status === 'error') {
+                return carry + 1;
+            }
+            if (item.status === 'uploading') {
+                return carry + item.progress;
+            }
+            return carry;
+        }, 0);
 
-        progressBar.css('width', Math.min(100, percent) + '%');
-        progressText.text(Math.round(Math.min(100, percent)) + '%');
-        progressCount.text(stats.completed + ' / ' + stats.total);
+        const percent = Math.min(100, (completedPortion / total) * 100);
+        const finished = state.queue.filter((item) => item.status === 'completed' || item.status === 'error').length;
+
+        globalBar.css('width', percent + '%');
+        progressText.text(Math.round(percent) + '%');
+        progressCount.text(finished + ' / ' + state.queue.length);
     }
 
-    function updateSummary() {
-        if (!stats.total) {
+    function updateStats() {
+        if (!state.queue.length) {
             summary.text('');
+            progressText.text('0%');
+            progressCount.text('0 / 0');
+            globalBar.css('width', '0%');
             return;
         }
+
+        const successCount = state.queue.filter((item) => item.status === 'completed').length;
+        const errorCount = state.queue.filter((item) => item.status === 'error').length;
         summary.text(
             (cgAdmin.strings.summary || 'Uploads:') + ' ' +
-            stats.success + ' ' + (cgAdmin.strings.done || 'completed') + ', ' +
-            stats.error + ' ' + (cgAdmin.strings.failed || 'failed')
+            successCount + ' ' + (cgAdmin.strings.done || 'completed') + ', ' +
+            errorCount + ' ' + (cgAdmin.strings.failed || 'failed')
         );
     }
 
@@ -197,6 +237,6 @@ jQuery(function ($) {
             alt: data.filename || '',
             loading: 'lazy',
         });
-        galleryList.append(img);
+        galleryList.prepend(img);
     }
 });
