@@ -15,7 +15,19 @@ $attachments = get_children([
 <div class="cg-meta-row cg-upload-area">
     <label for="cg-upload-input"><strong><?php esc_html_e('Upload images', 'client-galleries'); ?></strong></label><br />
     <input type="file" id="cg-upload-input" data-gallery="<?php echo esc_attr($data['post_id']); ?>" multiple accept="image/*" />
-    <div id="cg-upload-list" class="cg-upload-list">
+    <div class="cg-upload-progress-wrapper">
+        <div class="cg-upload-progress-bar-container" aria-hidden="true">
+            <div id="cg-upload-progress-bar" class="cg-upload-progress-bar"></div>
+        </div>
+        <div class="cg-upload-progress-meta">
+            <span id="cg-upload-progress-text">0%</span>
+            <span id="cg-upload-progress-count">0 / 0</span>
+            <span id="cg-upload-summary"></span>
+        </div>
+    </div>
+    <ul id="cg-upload-queue" class="cg-upload-queue" aria-live="polite" aria-label="<?php esc_attr_e('Upload queue', 'client-galleries'); ?>"></ul>
+    <h4><?php esc_html_e('Images in this gallery', 'client-galleries'); ?></h4>
+    <div id="cg-upload-gallery" class="cg-upload-list">
         <?php foreach ($attachments as $attachment) :
             $thumb = wp_get_attachment_image_src($attachment->ID, 'thumbnail');
             if ($thumb) : ?>
