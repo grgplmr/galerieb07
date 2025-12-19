@@ -1,0 +1,45 @@
+.cg-metabox .cg-upload {
+    margin-top: 10px;
+}
+
+#cg-upload-queue {
+    list-style: disc;
+    margin-left: 20px;
+}
+
+#cg-gallery-preview {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+    margin-top: 15px;
+}
+
+.cg-thumb {
+    border: 1px solid #e2e2e2;
+    padding: 6px;
+    text-align: center;
+    background: #fafafa;
+}
+
+.cg-thumb img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 0 auto 4px;
+}
+
+.cg-progress {
+    background: #f1f1f1;
+    border: 1px solid #ddd;
+    height: 10px;
+    width: 100%;
+    margin: 8px 0;
+    position: relative;
+}
+
+.cg-progress-bar {
+    background: #2c9cf2;
+    height: 100%;
+    width: 0;
+    display: block;
+}
