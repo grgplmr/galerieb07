@@ -18,6 +18,7 @@ $attachments = get_children([
         <input type="file" id="cg-upload-input" multiple accept="image/*" />
         <button type="button" id="cg-upload-start" class="button"><?php esc_html_e('Start upload', 'client-galleries'); ?></button>
     </div>
+    <p id="cg-upload-status" class="cg-upload-status-message" aria-live="polite"></p>
     <div id="cg-upload-global-progress" class="cg-upload-progress" aria-hidden="true">
         <div class="cg-upload-progress-track">
             <div class="cg-upload-progress-bar" role="presentation"></div>

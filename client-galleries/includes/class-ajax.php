@@ -28,6 +28,7 @@ class CG_Ajax
         add_action('wp_ajax_nopriv_cg_render_gallery', [$this, 'render_gallery']);
         add_action('wp_ajax_cg_render_gallery', [$this, 'render_gallery']);
         add_action('wp_ajax_cg_export_csv', [$this, 'export_csv']);
+        add_action('wp_ajax_cg_admin_ping', [$this, 'admin_ping']);
     }
 
     public function save_rating(): void
@@ -101,6 +102,19 @@ class CG_Ajax
             'html'      => $html,
             'email'     => $email,
             'selection' => $selection,
+        ]);
+    }
+
+    public function admin_ping(): void
+    {
+        check_ajax_referer('cg_admin_upload', 'nonce');
+
+        $post_id = isset($_POST['post_id']) ? absint($_POST['post_id']) : 0;
+
+        wp_send_json_success([
+            'ok'   => true,
+            'time' => time(),
+            'post' => $post_id,
         ]);
     }
 

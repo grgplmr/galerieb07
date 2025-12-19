@@ -1,4 +1,10 @@
 jQuery(function ($) {
+    const config = window.cgAdmin || window.CG_ADMIN || {};
+    const strings = config.strings || {};
+    config.strings = strings;
+    window.cgAdmin = config;
+    console.log('[CG] admin.js loaded', config);
+
     const fileInput = $('#cg-upload-input');
     const startButton = $('#cg-upload-start');
     const queueList = $('#cg-upload-queue');
@@ -7,6 +13,7 @@ jQuery(function ($) {
     const progressText = $('#cg-upload-progress-text');
     const progressCount = $('#cg-upload-progress-count');
     const summary = $('#cg-upload-summary');
+    const statusMessage = $('#cg-upload-status');
 
     const state = {
         queue: [],
@@ -29,6 +36,20 @@ jQuery(function ($) {
     });
 
     startButton.on('click', function () {
+        startUploads();
+    });
+
+    document.addEventListener('click', function (event) {
+        const btn = event.target.closest('#cg-upload-start');
+        if (!btn) {
+            return;
+        }
+        event.preventDefault();
+        console.log('[CG] Start upload clicked');
+        if (statusMessage.length) {
+            statusMessage.text('Start upload clicked');
+        }
+        sendPing();
         startUploads();
     });
 
@@ -70,7 +91,7 @@ jQuery(function ($) {
             '</li>'
         );
         itemEl.find('.cg-upload-filename').text(item.file.name);
-        itemEl.find('.cg-upload-status').text(cgAdmin.strings.queued || cgAdmin.strings.pending || 'Pending');
+        itemEl.find('.cg-upload-status').text(strings.queued || strings.pending || 'Pending');
         queueList.append(itemEl);
     }
 
@@ -93,12 +114,12 @@ jQuery(function ($) {
 
         const formData = new FormData();
         formData.append('action', 'cg_admin_upload_single');
-        formData.append('_ajax_nonce', cgAdmin.nonce_upload);
-        formData.append('gallery_id', cgAdmin.gallery_id);
+        formData.append('_ajax_nonce', config.nonce_upload);
+        formData.append('gallery_id', config.gallery_id);
         formData.append('file', item.file);
 
         const xhr = new XMLHttpRequest();
-        xhr.open('POST', cgAdmin.ajax_url, true);
+        xhr.open('POST', config.ajax_url, true);
         xhr.responseType = 'json';
 
         xhr.upload.onprogress = function (event) {
@@ -111,7 +132,7 @@ jQuery(function ($) {
         };
 
         xhr.onerror = function () {
-            handleItemError(item, cgAdmin.strings.networkError || 'Network error');
+            handleItemError(item, strings.networkError || 'Network error');
             finalizeUpload();
         };
 
@@ -126,7 +147,7 @@ jQuery(function ($) {
             }
 
             if (xhr.status !== 200 || !resp) {
-                handleItemError(item, cgAdmin.strings.serverError || 'Upload failed');
+                handleItemError(item, strings.serverError || 'Upload failed');
                 finalizeUpload();
                 return;
             }
@@ -136,7 +157,7 @@ jQuery(function ($) {
                 setItemStatus(item, 'completed');
                 appendThumbnail(resp.data);
             } else {
-                const message = (resp.data && resp.data.message) ? resp.data.message : (cgAdmin.strings.uploadError || 'Upload failed');
+                const message = (resp.data && resp.data.message) ? resp.data.message : (strings.uploadError || 'Upload failed');
                 handleItemError(item, message);
             }
 
@@ -168,16 +189,16 @@ jQuery(function ($) {
 
         switch (status) {
             case 'uploading':
-                statusLabel.text(cgAdmin.strings.uploading || 'Uploading');
+                statusLabel.text(strings.uploading || 'Uploading');
                 break;
             case 'completed':
-                statusLabel.text(cgAdmin.strings.completed || 'Completed');
+                statusLabel.text(strings.completed || 'Completed');
                 break;
             case 'error':
-                statusLabel.text(cgAdmin.strings.error || 'Error');
+                statusLabel.text(strings.error || 'Error');
                 break;
             default:
-                statusLabel.text(cgAdmin.strings.queued || cgAdmin.strings.pending || 'Pending');
+                statusLabel.text(strings.queued || strings.pending || 'Pending');
         }
     }
 
@@ -220,9 +241,9 @@ jQuery(function ($) {
         const successCount = state.queue.filter((item) => item.status === 'completed').length;
         const errorCount = state.queue.filter((item) => item.status === 'error').length;
         summary.text(
-            (cgAdmin.strings.summary || 'Uploads:') + ' ' +
-            successCount + ' ' + (cgAdmin.strings.done || 'completed') + ', ' +
-            errorCount + ' ' + (cgAdmin.strings.failed || 'failed')
+            (strings.summary || 'Uploads:') + ' ' +
+            successCount + ' ' + (strings.done || 'completed') + ', ' +
+            errorCount + ' ' + (strings.failed || 'failed')
         );
     }
 
@@ -238,5 +259,36 @@ jQuery(function ($) {
             loading: 'lazy',
         });
         galleryList.prepend(img);
+    }
+
+    function sendPing() {
+        const payload = new FormData();
+        payload.append('action', 'cg_admin_ping');
+        payload.append('nonce', config.nonce || '');
+        payload.append('post_id', config.post_id || 0);
+
+        const url = config.ajax_url || (typeof ajaxurl !== 'undefined' ? ajaxurl : '');
+        if (!url) {
+            console.warn('[CG] Missing ajax URL for ping');
+            return;
+        }
+
+        fetch(url, {
+            method: 'POST',
+            credentials: 'same-origin',
+            body: payload,
+        }).then((response) => response.json())
+            .then((data) => {
+                console.log('[CG] Ping response', data);
+                if (statusMessage.length) {
+                    statusMessage.text(data && data.success ? 'Ping OK' : 'Ping failed');
+                }
+            })
+            .catch((error) => {
+                console.error('[CG] Ping error', error);
+                if (statusMessage.length) {
+                    statusMessage.text('Ping error');
+                }
+            });
     }
 });
